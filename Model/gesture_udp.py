@@ -1,20 +1,3 @@
-"""
-Reconocimiento en tiempo real + envío por UDP a Unity (versión de baja latencia).
-
-Mejoras respecto a la versión anterior:
-  - Captura de cámara en un hilo aparte que siempre entrega el frame MÁS RECIENTE
-    (evita procesar frames viejos acumulados en el búfer de la cámara).
-  - Suavizado por frames consecutivos en vez de ventana de votación: activar un
-    movimiento tarda FRAMES_TO_ACTIVATE frames; volver a reposo, FRAMES_TO_STOP.
-  - Random Forest forzado a 1 hilo (con n_jobs=-1 cada predicción de una sola
-    muestra puede costar decenas de ms solo por el reparto entre hilos).
-  - MediaPipe en modo ligero (model_complexity=0) y cámara a 640x480.
-  - Muestra en pantalla FPS y tiempo de proceso por frame para diagnosticar.
-
-Mensajes enviados (texto plano): REPOSO (puño) | DERECHA | IZQUIERDA | PALMA | NINGUNO
-(NINGUNO = sin mano detectada o gesto poco seguro; Unity lo trata como "quieto")
-Teclas: q = salir
-"""
 import socket
 import sys
 import threading
@@ -27,28 +10,22 @@ import numpy as np
 
 from landmark_utils import landmarks_to_features
 
-# ---------------- Configuración ----------------
 MODEL_PATH = "model/gesture_model.joblib"
 CAMERA_INDEX = 0
 CAM_WIDTH, CAM_HEIGHT, CAM_FPS = 640, 480, 60
-# En Windows, DirectShow suele tener menos latencia que el backend por defecto.
-# Si la cámara no abre, ponlo en False.
 USE_DSHOW_ON_WINDOWS = True
 
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
-HEARTBEAT = 0.1  # segundos entre reenvíos del estado actual
+HEARTBEAT = 0.1
 
-CONF_THRESHOLD = 0.70       # confianza mínima para aceptar un gesto
-FRAMES_TO_ACTIVATE = 3      # frames seguidos iguales para empezar a moverse
-FRAMES_TO_STOP = 2          # frames seguidos para volver a REPOSO (más rápido)
-DEFAULT_STATE = "NINGUNO"  # sin mano o sin confianza; NO es lo mismo que el puño (REPOSO)
-# -----------------------------------------------
+CONF_THRESHOLD = 0.70
+FRAMES_TO_ACTIVATE = 3
+FRAMES_TO_STOP = 2
+DEFAULT_STATE = "NINGUNO"
 
 
 class LatestFrameReader:
-    """Lee la cámara en un hilo y conserva solo el último frame."""
-
     def __init__(self, index, width, height, fps):
         backend = cv2.CAP_DSHOW if (USE_DSHOW_ON_WINDOWS and sys.platform == "win32") else cv2.CAP_ANY
         self.cap = cv2.VideoCapture(index, backend)
@@ -72,7 +49,6 @@ class LatestFrameReader:
                 self.frame = frame
 
     def read(self):
-        """Devuelve el frame nuevo (o None si aún no hay uno nuevo)."""
         with self.lock:
             f, self.frame = self.frame, None
         return f
@@ -84,7 +60,6 @@ class LatestFrameReader:
 
 
 def force_single_thread(model):
-    """Evita el sobrecoste de paralelismo al predecir 1 muestra por frame."""
     if hasattr(model, "n_jobs"):
         model.n_jobs = 1
     for _, step in getattr(model, "steps", []):
@@ -108,7 +83,7 @@ def main():
     hands = mp.solutions.hands.Hands(
         static_image_mode=False,
         max_num_hands=1,
-        model_complexity=0,  # modelo ligero: más rápido
+        model_complexity=0,
         min_detection_confidence=0.6,
         min_tracking_confidence=0.6,
     )
@@ -132,7 +107,7 @@ def main():
                 continue
 
             t0 = time.perf_counter()
-            frame = cv2.flip(frame, 1)  # MISMO espejo que en la recolección
+            frame = cv2.flip(frame, 1)
             result = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
             raw_label, conf = DEFAULT_STATE, 0.0
@@ -148,7 +123,6 @@ def main():
                     frame_label = raw_label
             proc_ms = (time.perf_counter() - t0) * 1000.0
 
-            # Suavizado por frames consecutivos (sube rápido, baja más rápido)
             if frame_label == candidate:
                 candidate_count += 1
             else:
@@ -164,7 +138,6 @@ def main():
                 send(stable)
                 last_sent = now
 
-            # FPS (media móvil)
             t_now = time.perf_counter()
             fps = 0.9 * fps + 0.1 * (1.0 / max(t_now - last_frame_time, 1e-6))
             last_frame_time = t_now
@@ -179,7 +152,7 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
-        send(DEFAULT_STATE)  # al salir, el personaje se queda quieto
+        send(DEFAULT_STATE)
         sock.close()
         reader.release()
         cv2.destroyAllWindows()

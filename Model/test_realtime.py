@@ -1,15 +1,3 @@
-"""
-Prueba en tiempo real del modelo entrenado (sin Unity todavía).
-
-Muestra la predicción cruda, la confianza y el gesto ESTABLE (el que más adelante
-se enviaría por UDP). Teclas: q = salir.
-
-Estabilización:
-  - Si la confianza < CONF_THRESHOLD, el frame cuenta como REPOSO.
-  - Si no hay mano detectada, cuenta como REPOSO (el personaje se queda quieto).
-  - El gesto estable es el más frecuente en los últimos WINDOW frames, y solo
-    cambia si supera MIN_VOTES votos (evita parpadeos).
-"""
 from collections import Counter, deque
 
 import cv2
@@ -48,7 +36,7 @@ def main():
         ok, frame = cap.read()
         if not ok:
             break
-        frame = cv2.flip(frame, 1)  # MISMO espejo que en la recolección
+        frame = cv2.flip(frame, 1)
         result = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
         raw_label, conf = DEFAULT_STATE, 0.0
@@ -67,7 +55,7 @@ def main():
         label, votes = Counter(history).most_common(1)[0]
         if votes >= MIN_VOTES and label != stable:
             stable = label
-            print("Gesto estable ->", stable)  # aquí luego irá el envío por UDP
+            print("Gesto estable ->", stable)
 
         cv2.putText(frame, f"Crudo: {raw_label} ({conf:.2f})", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)

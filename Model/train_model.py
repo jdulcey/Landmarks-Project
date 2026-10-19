@@ -1,13 +1,3 @@
-"""
-Entrenamiento y evaluación.
-
-- Separa train/test POR SESIÓN (no por frame aleatorio) para tener una
-  estimación honesta de cómo funcionará con datos nuevos.
-- Aumento de datos solo sobre train: reflejo horizontal (x -> -x) intercambiando
-  DERECHA <-> IZQUIERDA, y ruido gaussiano leve. NO se usan rotaciones, porque
-  la orientación de la mano es lo que define el gesto.
-- Compara Random Forest, SVM y MLP; guarda el mejor en model/gesture_model.joblib.
-"""
 import os
 import sys
 
@@ -31,7 +21,6 @@ rng = np.random.default_rng(SEED)
 
 
 def augment(X, y_labels, noise_std=0.01):
-    """Devuelve train original + reflejado (con etiquetas cambiadas) + versión con ruido."""
     X_m = np.array([mirror_features(x) for x in X])
     y_m = np.array([MIRROR_LABEL[l] for l in y_labels])
     X_all = np.vstack([X, X_m])
@@ -94,7 +83,6 @@ def main():
     print("Orden:", CLASSES)
     print(confusion_matrix(y_test, pred, labels=CLASSES))
 
-    # Reentrena el mejor con TODOS los datos antes de guardar
     X_full_aug, y_full_aug = augment(X, y)
     best_model.fit(X_full_aug, y_full_aug)
 

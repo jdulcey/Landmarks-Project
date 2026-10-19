@@ -1,12 +1,3 @@
-"""
-Receptor UDP de prueba (sustituye a Unity para verificar que los mensajes llegan).
-
-Uso:
-  1) python udp_listener_test.py
-  2) en otra terminal: python gesture_udp.py
-Imprime solo cuando el mensaje cambia (el heartbeat repetido no ensucia la consola).
-Ctrl + C para salir.
-"""
 import socket
 
 UDP_IP = "127.0.0.1"

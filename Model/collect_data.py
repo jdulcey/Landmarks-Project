@@ -1,22 +1,3 @@
-"""
-Recolección de datos.
-
-Teclas:
-  1 = grabar REPOSO (puño cerrado)
-  2 = grabar DERECHA (mano señalando a la derecha)
-  3 = grabar IZQUIERDA (mano señalando a la izquierda)
-  4 = grabar PALMA (palma abierta, dedos hacia arriba, mirando a la cámara)
-  5 = grabar DOS_DEDOS (símbolo de paz: índice y medio arriba, palma a la cámara)
-  6 = grabar UN_DEDO (solo el índice arriba, palma a la cámara)
-  p = pausar grabación
-  q = salir
-
-Cada ejecución del script es una "sesión" (se guarda un id de sesión por fila).
-Esto permite luego validar el modelo con sesiones que nunca vio al entrenar.
-
-Dirección: la imagen se muestra como espejo (como un espejo real). "Derecha"
-significa hacia TU derecha, que es la derecha de la pantalla.
-"""
 import csv
 import os
 import time
@@ -68,14 +49,14 @@ def main():
     cap = cv2.VideoCapture(CAMERA_INDEX)
     current_label = None
     last_save = 0.0
-    SAVE_INTERVAL = 0.05  # ~20 muestras/seg (evita guardar frames casi idénticos)
+    SAVE_INTERVAL = 0.05
 
     print(f"Sesión: {session_id}. Presiona 1-6 para grabar, p pausa, q salir.")
     while True:
         ok, frame = cap.read()
         if not ok:
             break
-        frame = cv2.flip(frame, 1)  # espejo
+        frame = cv2.flip(frame, 1)
         result = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
         hand_detected = bool(result.multi_hand_landmarks)
