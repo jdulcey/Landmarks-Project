@@ -18,6 +18,9 @@ using UnityEngine.InputSystem;
 /// coinciden con el inicio de ninguna habilidad, los cuadrados se ponen en rojo un momento y
 /// vuelven a negro para intentarlo otra vez (sin perder el turno).
 ///
+/// Críticos: al completar una secuencia hay una probabilidad (criticalChance) de que el ataque
+/// sea crítico: usa criticalDamage de la habilidad y muestra efectos visuales distintos.
+///
 /// Gestos que envía Python: REPOSO (puño), PALMA, DERECHA, IZQUIERDA, DOS_DEDOS, UN_DEDO, NINGUNO.
 /// Prueba sin cámara: mantén 1 (PALMA), 2 (PUÑO), 3 (DOS_DEDOS) o 4 (UN_DEDO).
 /// </summary>
@@ -29,7 +32,9 @@ public class BattleManager : MonoBehaviour
         public string name = "Golpe";
         [Tooltip("Gestos en orden. Valores: PALMA, REPOSO (= puño), DERECHA, IZQUIERDA, DOS_DEDOS, UN_DEDO")]
         public string[] sequence = { "PALMA", "REPOSO", "PALMA" };
-        public int damage = 20;
+        public int damage = 5;
+        [Tooltip("Daño cuando el ataque es crítico.")]
+        public int criticalDamage = 10;
         [Tooltip("Marcado = ataque a distancia: no se acerca, lanza un proyectil durante la animación Punch.")]
         public bool isProjectile = false;
     }
@@ -45,8 +50,23 @@ public class BattleManager : MonoBehaviour
     [Tooltip("Segundos que los cuadrados quedan en rojo tras una secuencia equivocada.")]
     [SerializeField] private float errorDuration = 0.6f;
     [SerializeField] private int playerMaxHp = 100;
-    [SerializeField] private int enemyMaxHp = 60;
-    [SerializeField] private int enemyDamage = 15;
+    [SerializeField] private int enemyMaxHp = 100;
+    [SerializeField] private int enemyDamage = 1;
+
+    [Header("Críticos")]
+    [Tooltip("Probabilidad de crítico (0.2 = 20%).")]
+    [Range(0f, 1f)] [SerializeField] private float criticalChance = 0.2f;
+    [SerializeField] private Color criticalHitColor = new Color(1f, 0.6f, 0f);
+    [SerializeField] private float criticalFlashDuration = 0.5f;
+    [SerializeField] private Color criticalTextColor = new Color(1f, 0.8f, 0f);
+    [SerializeField] private float criticalProjectileScale = 1.8f;
+
+    [Header("Interfaz de golpes (opcional)")]
+    [Tooltip("Texto en el Canvas donde aparece '-5' o '¡CRÍTICO! -10'.")]
+    [SerializeField] private TMP_Text damagePopupText;
+    [Tooltip("Image a pantalla completa (alpha 0) que destella en un crítico.")]
+    [SerializeField] private Image criticalScreenFlash;
+    [SerializeField] private Color criticalScreenFlashColor = new Color(1f, 0.85f, 0.2f, 0.45f);
 
     [Header("Personajes")]
     [SerializeField] private Transform playerTransform;
@@ -112,6 +132,7 @@ public class BattleManager : MonoBehaviour
     private State state;
     private Color enemyOriginalColor = Color.white;
     private Coroutine flashRoutine;
+    private Coroutine popupRoutine;
     private float timer;
     private int playerHp, enemyHp;
 
@@ -134,6 +155,7 @@ public class BattleManager : MonoBehaviour
                 name = "Lanzar objeto",
                 sequence = new[] { "DOS_DEDOS", "REPOSO", "UN_DEDO" },
                 damage = 20,
+                criticalDamage = 25,
                 isProjectile = true
             }
         };
@@ -200,6 +222,9 @@ public class BattleManager : MonoBehaviour
             enemySprite = enemyTransform.GetComponentInChildren<SpriteRenderer>();
         if (enemySprite != null)
             enemyOriginalColor = enemySprite.color;
+
+        if (damagePopupText != null) damagePopupText.gameObject.SetActive(false);
+        if (criticalScreenFlash != null) criticalScreenFlash.color = new Color(0, 0, 0, 0);
 
         playerHp = playerMaxHp;
         enemyHp = enemyMaxHp;
@@ -289,7 +314,11 @@ public class BattleManager : MonoBehaviour
 
         if (completed != null)
         {
-            StartCoroutine(completed.isProjectile ? ProjectileAction(completed) : PlayerAction(completed));
+            // Aquí se tira el dado del crítico.
+            bool crit = UnityEngine.Random.value < criticalChance;
+            StartCoroutine(completed.isProjectile
+                ? ProjectileAction(completed, crit)
+                : PlayerAction(completed, crit));
         }
         else if (input.Count >= MaxSequenceLength())
         {
@@ -315,11 +344,23 @@ public class BattleManager : MonoBehaviour
 
     // --------------------------------------------------------------- Acciones
 
+    private int GetDamage(Skill skill, bool crit)
+    {
+        // Si criticalDamage no está configurado (0), usa el doble como respaldo.
+        if (!crit) return skill.damage;
+        return skill.criticalDamage > 0 ? skill.criticalDamage : skill.damage * 2;
+    }
+
+    private static string ActionMessage(Skill skill, bool crit)
+    {
+        return crit ? $"¡¡CRÍTICO!! ¡{skill.name}!" : $"¡{skill.name}!";
+    }
+
     /// <summary>Ataque cuerpo a cuerpo: dash, golpe, regreso.</summary>
-    private IEnumerator PlayerAction(Skill skill)
+    private IEnumerator PlayerAction(Skill skill, bool crit)
     {
         state = State.Acting;
-        SetText(statusText, $"¡{skill.name}!");
+        SetText(statusText, ActionMessage(skill, crit));
 
         Vector3 start = playerTransform.position;
         Vector3 enemyPos = enemyTransform.position;
@@ -342,7 +383,7 @@ public class BattleManager : MonoBehaviour
         float clipLength = GetCurrentStateLength(0.4f);
         yield return new WaitForSeconds(clipLength * hitMoment);
 
-        ApplyDamageToEnemy(skill.damage);
+        ApplyDamageToEnemy(GetDamage(skill, crit), crit);
         yield return new WaitForSeconds(clipLength * (1f - hitMoment) + 0.15f);
 
         // 3) Regreso: dash mirando hacia el lado contrario
@@ -359,10 +400,10 @@ public class BattleManager : MonoBehaviour
     }
 
     /// <summary>Ataque a distancia: anima Punch y en el frame indicado sale un proyectil.</summary>
-    private IEnumerator ProjectileAction(Skill skill)
+    private IEnumerator ProjectileAction(Skill skill, bool crit)
     {
         state = State.Acting;
-        SetText(statusText, $"¡{skill.name}!");
+        SetText(statusText, ActionMessage(skill, crit));
 
         Vector3 enemyPos = enemyTransform.position;
         SpriteRenderer sr = playerTransform.GetComponentInChildren<SpriteRenderer>();
@@ -379,8 +420,8 @@ public class BattleManager : MonoBehaviour
         yield return new WaitForSeconds(spawnTime);
 
         bool hit = false;
-        GameObject proj = SpawnProjectile(sr, dirToEnemy);
-        StartCoroutine(FlyProjectile(proj, skill.damage, () => hit = true));
+        GameObject proj = SpawnProjectile(sr, dirToEnemy, crit);
+        StartCoroutine(FlyProjectile(proj, GetDamage(skill, crit), crit, () => hit = true));
 
         // Termina la animación mientras el proyectil vuela.
         yield return new WaitForSeconds(Mathf.Max(0f, clipLength - spawnTime));
@@ -395,7 +436,7 @@ public class BattleManager : MonoBehaviour
         else StartCoroutine(EnemyTurn());
     }
 
-    private GameObject SpawnProjectile(SpriteRenderer playerSr, float dirToEnemy)
+    private GameObject SpawnProjectile(SpriteRenderer playerSr, float dirToEnemy, bool crit)
     {
         float baseY = playerSr != null ? playerSr.bounds.center.y : playerTransform.position.y;
         Vector3 pos = new Vector3(
@@ -404,14 +445,18 @@ public class BattleManager : MonoBehaviour
             playerTransform.position.z);
 
         if (projectilePrefab != null)
-            return Instantiate(projectilePrefab, pos, Quaternion.identity);
+        {
+            var inst = Instantiate(projectilePrefab, pos, Quaternion.identity);
+            if (crit) inst.transform.localScale *= criticalProjectileScale;
+            return inst;
+        }
 
         var go = new GameObject("Projectile");
         go.transform.position = pos;
-        go.transform.localScale = Vector3.one * projectileSize;
+        go.transform.localScale = Vector3.one * projectileSize * (crit ? criticalProjectileScale : 1f);
         var psr = go.AddComponent<SpriteRenderer>();
         psr.sprite = GetCircleSprite();
-        psr.color = projectileColor;
+        psr.color = crit ? criticalHitColor : projectileColor;
         if (playerSr != null)
         {
             psr.sortingLayerID = playerSr.sortingLayerID;
@@ -421,7 +466,7 @@ public class BattleManager : MonoBehaviour
         return go;
     }
 
-    private IEnumerator FlyProjectile(GameObject proj, int damage, Action onHit)
+    private IEnumerator FlyProjectile(GameObject proj, int damage, bool crit, Action onHit)
     {
         Vector3 target = GetEnemyHitPoint();
         while (proj != null && Vector3.Distance(proj.transform.position, target) > 0.05f)
@@ -431,7 +476,7 @@ public class BattleManager : MonoBehaviour
         }
         if (proj != null) Destroy(proj);
 
-        ApplyDamageToEnemy(damage);
+        ApplyDamageToEnemy(damage, crit);
         onHit?.Invoke();
     }
 
@@ -460,11 +505,14 @@ public class BattleManager : MonoBehaviour
         return circleSprite;
     }
 
-    private void ApplyDamageToEnemy(int damage)
+    private void ApplyDamageToEnemy(int damage, bool crit)
     {
         enemyHp = Mathf.Max(0, enemyHp - damage);
         RefreshHp();
-        FlashEnemy();
+        FlashEnemy(crit);
+
+        if (popupRoutine != null) StopCoroutine(popupRoutine);
+        popupRoutine = StartCoroutine(HitPopup(damage, crit));
     }
 
     private IEnumerator TurnTimeout()
@@ -511,20 +559,67 @@ public class BattleManager : MonoBehaviour
         SceneManager.LoadScene(returnScene);
     }
 
-    private void FlashEnemy()
+    // ------------------------------------------------------- Efectos de golpe
+
+    private void FlashEnemy(bool crit)
     {
         if (enemySprite == null) return;
         if (flashRoutine != null) StopCoroutine(flashRoutine);
-        flashRoutine = StartCoroutine(HitFlash());
+        flashRoutine = StartCoroutine(HitFlash(
+            crit ? criticalHitColor : hitColor,
+            crit ? criticalFlashDuration : hitFlashDuration));
     }
 
-    private IEnumerator HitFlash()
+    private IEnumerator HitFlash(Color color, float duration)
     {
-        enemySprite.color = hitColor;
-        yield return new WaitForSeconds(hitFlashDuration);
+        enemySprite.color = color;
+        yield return new WaitForSeconds(duration);
         enemySprite.color = enemyOriginalColor;
         flashRoutine = null;
     }
+
+    private IEnumerator HitPopup(int damage, bool crit)
+    {
+        float duration = crit ? 1.2f : 0.7f;
+        float peakScale = crit ? 1.8f : 1.2f;
+
+        if (damagePopupText != null)
+        {
+            damagePopupText.gameObject.SetActive(true);
+            damagePopupText.text = crit ? $"¡CRÍTICO!\n-{damage}" : $"-{damage}";
+        }
+
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float k = Mathf.Clamp01(elapsed / duration);
+
+            if (damagePopupText != null)
+            {
+                // Aparece grande y se encoge; al final se desvanece.
+                float scale = Mathf.Lerp(peakScale, 1f, Mathf.Clamp01(k * 4f));
+                damagePopupText.transform.localScale = Vector3.one * scale;
+                Color c = crit ? criticalTextColor : Color.white;
+                c.a = k > 0.7f ? 1f - (k - 0.7f) / 0.3f : 1f;
+                damagePopupText.color = c;
+            }
+
+            if (criticalScreenFlash != null)
+            {
+                Color f = criticalScreenFlashColor;
+                f.a = crit ? Mathf.Lerp(criticalScreenFlashColor.a, 0f, k) : 0f;
+                criticalScreenFlash.color = f;
+            }
+            yield return null;
+        }
+
+        if (damagePopupText != null) damagePopupText.gameObject.SetActive(false);
+        if (criticalScreenFlash != null) criticalScreenFlash.color = new Color(0, 0, 0, 0);
+        popupRoutine = null;
+    }
+
+    // ------------------------------------------------------------- Animación
 
     private void PlayState(string stateName)
     {
