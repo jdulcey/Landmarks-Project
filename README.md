@@ -60,14 +60,14 @@ flowchart LR
 
 | Clase | Muestras |
 |---|---|
-| `REPOSO` | — |
-| `DERECHA` | — |
-| `IZQUIERDA` | — |
-| `PALMA` | — |
-| `DOS_DEDOS` | — |
-| `UN_DEDO` | — |
+| `REPOSO` | 10919 |
+| `DERECHA` | 10011 |
+| `IZQUIERDA` | 10266 |
+| `PALMA` | 12990 |
+| `DOS_DEDOS` | 9070 |
+| `UN_DEDO` | 9034 |
 
-Sesiones grabadas: —  ·  F1 macro en test: —
+Sesiones grabadas: 23  ·  F1 macro en test: 0.8024
 
 ## Estructura del repositorio
 
