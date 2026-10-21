@@ -4,7 +4,7 @@
 
 Videojuego 2D hecho en **Unity** que se controla con la mano frente a la cámara. Un modelo de aprendizaje automático clasifica los gestos a partir de los *landmarks* de **MediaPipe** y envía la orden al juego en tiempo real. El proyecto funciona en dos modos:
 
-- **Escritorio / Editor de Unity:** un script de Python reconoce los gestos y los envía por **UDP** a Unity.
+- **Editor de Unity:** un script de Python reconoce los gestos y los envía por **UDP** a Unity.
 - **Web (WebGL):** todo corre en el navegador. MediaPipe (JavaScript) y el mismo modelo exportado a **ONNX** reconocen los gestos y se los pasan a Unity con `SendMessage`. No requiere Python ni servidor.
 
 > 🎮 **Juega la demo en itch.io:** [elrealbrr.itch.io/landmarks-project](https://elrealbrr.itch.io/landmarks-project)
