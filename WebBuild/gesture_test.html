@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prueba de gestos (sin Unity)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #111; color: #eee; margin: 0; padding: 20px; }
+    button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
+    pre { background: #1c1c1c; padding: 10px; border-radius: 6px; white-space: pre-wrap; }
+    .row { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 16px; }
+    .mirror { position: relative; width: 480px; height: 360px; transform: scaleX(-1); background: #000; }
+    .mirror video, .mirror canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .mirror video { object-fit: fill; }
+    .big { font-size: 40px; font-weight: bold; color: #00e676; }
+  </style>
+</head>
+<body>
+  <h2>Prueba de gestos (sin Unity)</h2>
+  <button id="start">Iniciar</button>
+  <pre id="selftest">Pulsa Iniciar. Se cargará el modelo, se comprobará la paridad con Python y se pedirá la cámara.</pre>
+
+  <div class="row">
+    <div class="mirror">
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="hand" width="480" height="360"></canvas>
+    </div>
+    <div>
+      <div>Gesto enviado a Unity:</div>
+      <div class="big" id="stable">NINGUNO</div>
+      <div id="raw"></div>
+      <div id="perf"></div>
+      <h4>Cambios de gesto</h4>
+      <pre id="log"></pre>
+    </div>
+  </div>
+
+  <script type="module">
+    import { GestureEngine, drawHand } from "./gesture/gestures.js";
+
+    const $ = (id) => document.getElementById(id);
+    const ctx = $("hand").getContext("2d");
+    let lastSent = "NINGUNO";
+    let fps = 0, lastT = performance.now();
+    const lines = [];
+
+    function addLog(text) {
+      lines.unshift(new Date().toLocaleTimeString() + "  " + text);
+      lines.length = Math.min(lines.length, 12);
+      $("log").textContent = lines.join("\n");
+    }
+
+    const engine = new GestureEngine({
+      onSend(g) {
+        if (g !== lastSent) { lastSent = g; addLog(g); }
+      },
+      onDebug({ raw, conf, stable, ms, landmarks }) {
+        drawHand(ctx, landmarks, 480, 360);
+        $("stable").textContent = stable;
+        $("raw").textContent = landmarks ? "Crudo: " + raw + " (" + conf.toFixed(2) + ")" : "Sin mano detectada";
+        const now = performance.now();
+        fps = 0.9 * fps + 0.1 * (1000 / Math.max(now - lastT, 1));
+        lastT = now;
+        $("perf").textContent = "FPS " + fps.toFixed(1) + " | proceso " + ms.toFixed(1) + " ms";
+      },
+    });
+
+    $("start").addEventListener("click", async () => {
+      $("start").disabled = true;
+      const out = $("selftest");
+      try {
+        out.textContent = "Cargando modelos (ONNX + MediaPipe)…";
+        await engine.init();
+
+        const r = await engine.selfTest();
+        out.textContent =
+          (r.ok ? "PARIDAD OK" : "PARIDAD FALLÓ") +
+          " | diferencia máx " + r.maxDiff.toExponential(2) +
+          " | orden de clases " + (r.sameOrder ? "igual" : "DISTINTO") + "\n" +
+          r.details.map((d) => "  " + d.label + ": " + d.diff.toExponential(2)).join("\n");
+
+        await engine.start($("cam"));
+      } catch (e) {
+        console.error(e);
+        out.textContent += "\nERROR: " + e.name + ": " + e.message;
+        $("start").disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

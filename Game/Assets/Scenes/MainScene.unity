@@ -1505,7 +1505,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 60cf9c7901087ae4eb8f6c5978b47c8a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GestureReceiver
-  port: 5005
   timeoutSeconds: 0.5
 --- !u!4 &679893382
 Transform:

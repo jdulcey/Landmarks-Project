@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{{ PRODUCT_NAME }}}</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; color: #eee; font-family: system-ui, sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; }
+    [hidden] { display: none !important; }
+
+    .game {
+      display: block; background: #000;
+      width: min({{{ WIDTH }}}px, 100vw, calc(100vh * {{{ WIDTH }}} / {{{ HEIGHT }}}));
+      aspect-ratio: {{{ WIDTH }}} / {{{ HEIGHT }}};
+    }
+
+    .start-screen {
+      position: fixed; inset: 0; z-index: 10; background: #111; padding: 24px; text-align: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+    }
+    .start-screen p { max-width: 460px; margin: 0; line-height: 1.5; color: #bbb; }
+    .btn { font-size: 18px; padding: 12px 32px; border: 0; border-radius: 8px; background: #00e676; color: #000; cursor: pointer; }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .btn.secondary { background: transparent; color: #bbb; border: 1px solid #555; font-size: 14px; padding: 8px 16px; }
+    .bar { width: min(320px, 80vw); height: 8px; background: #333; border-radius: 4px; overflow: hidden; }
+    .bar > div { height: 100%; width: 0; background: #00e676; transition: width .2s; }
+
+    .notice {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 20; padding: 8px 12px;
+      background: #b71c1c; color: #fff; text-align: center; font-size: 14px;
+    }
+
+    .preview {
+      position: fixed; right: 12px; bottom: 12px; z-index: 5; width: 200px;
+      background: rgba(0, 0, 0, .6); border-radius: 8px; padding: 6px; font-size: 12px; text-align: center;
+    }
+    .mirror { position: relative; width: 200px; height: 150px; transform: scaleX(-1); background: #000; }
+    .mirror video, .mirror canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .mirror video { object-fit: fill; }
+  </style>
+</head>
+<body>
+  <canvas id="unity-canvas" class="game" tabindex="-1" width="{{{ WIDTH }}}" height="{{{ HEIGHT }}}"></canvas>
+
+  <div id="notice" class="notice" hidden></div>
+
+  <div id="preview" class="preview" hidden>
+    <div class="mirror">
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="hand-canvas" width="200" height="150"></canvas>
+    </div>
+    <div id="gesture-text">NINGUNO</div>
+  </div>
+
+  <div id="start-screen" class="start-screen">
+    <h1>{{{ PRODUCT_NAME }}}</h1>
+    <p>Este juego se controla con gestos de mano y necesita tu cámara. El video se procesa en tu
+       dispositivo y no se envía a ningún servidor.</p>
+    <button id="start-btn" class="btn">Iniciar</button>
+    <div class="bar"><div id="bar-fill"></div></div>
+    <div id="status"></div>
+    <button id="skip-btn" class="btn secondary" hidden>Jugar solo con teclado</button>
+  </div>
+
+  <script type="module">
+    import { GestureEngine, drawHand } from "./gesture/gestures.js";
+
+    const $ = (id) => document.getElementById(id);
+    const canvas = $("unity-canvas");
+    const handCtx = $("hand-canvas").getContext("2d");
+
+    // Nombre del GameObject en la jerarquía de Unity y método público de GestureReceiver.cs
+    const UNITY_OBJECT = "GestureReceiver";
+    const UNITY_METHOD = "OnGesture";
+
+    let unityInstance = null;
+    let startClosed = false;
+
+    const buildUrl = "Build";
+    const config = {
+      dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+      frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_WASM
+      codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+#endif
+#if MEMORY_FILENAME
+      memoryUrl: buildUrl + "/{{{ MEMORY_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+      symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+#endif
+      streamingAssetsUrl: "StreamingAssets",
+      companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+      productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+      productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+    };
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error("No se pudo cargar " + src));
+        document.body.appendChild(s);
+      });
+    }
+
+    async function startUnity() {
+      await loadScript(buildUrl + "/{{{ LOADER_FILENAME }}}");
+      unityInstance = await createUnityInstance(canvas, config, (p) => {
+        $("bar-fill").style.width = Math.round(p * 100) + "%";
+      });
+    }
+
+    // ----- Gestos -----
+    function onSend(gesture) {
+      if (unityInstance) unityInstance.SendMessage(UNITY_OBJECT, UNITY_METHOD, gesture);
+    }
+
+    function onDebug({ raw, conf, stable, landmarks }) {
+      drawHand(handCtx, landmarks, 200, 150);
+      $("gesture-text").textContent = landmarks ? stable + " (" + raw + " " + conf.toFixed(2) + ")" : stable;
+    }
+
+    function showNotice(text) {
+      $("notice").textContent = text;
+      $("notice").hidden = false;
+    }
+
+    function describeError(e) {
+      if (e && e.name === "NotAllowedError")
+        return "Permiso de cámara denegado. Puedes jugar con el teclado (A/D o flechas). Para usar gestos, permite la cámara en el candado de la barra de direcciones y recarga la página.";
+      if (e && e.name === "NotFoundError")
+        return "No se encontró ninguna cámara. Puedes jugar con el teclado (A/D o flechas).";
+      return "No se pudo iniciar el control por gestos (" + (e && e.message ? e.message : e) + "). Puedes jugar con el teclado.";
+    }
+
+    // Nunca rechaza: si algo falla, avisa y el juego sigue con teclado.
+    async function startGestures() {
+      try {
+        const engine = new GestureEngine({ onSend, onDebug });
+        await engine.init();
+        await engine.start($("cam"));
+        $("preview").hidden = false;
+      } catch (e) {
+        console.error(e);
+        showNotice(describeError(e));
+      }
+    }
+
+    function closeStart() {
+      if (startClosed) return;
+      startClosed = true;
+      $("start-screen").hidden = true;
+      canvas.focus();
+    }
+
+    $("skip-btn").addEventListener("click", closeStart);
+
+    $("start-btn").addEventListener("click", async () => {
+      $("start-btn").disabled = true;
+      $("status").textContent = "Cargando el juego y el modelo de gestos…";
+
+      const gesturesDone = startGestures();
+      try {
+        await startUnity();
+      } catch (e) {
+        console.error(e);
+        $("status").textContent = "Error al cargar el juego: " + e.message;
+        return;
+      }
+      $("status").textContent = "Juego listo. Esperando la cámara…";
+      $("skip-btn").hidden = false;
+
+      await gesturesDone;
+      closeStart();
+    });
+  </script>
+</body>
+</html>
